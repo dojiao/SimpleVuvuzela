@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package SimpleVuvuzela
+package main
 
 import (
-	"encoding/binary"
-	"math"
 	"crypto/rand"
+	"encoding/binary"
+	"fmt"
+	"math"
 )
 
 type Laplace struct {
@@ -25,12 +26,12 @@ func (l Laplace) Uint32() uint32 {
 }
 
 func laplace(mu, b float64) float64 {
-	var r [8]byte
-	if _, err := rand.Read(r[:]); err != nil {
-		panic(err)
+	r := make([]byte, 8)
+	if _, err := rand.Read(r); err != nil {
+		fmt.Printf("generate random num error: %s\n", err)
 	}
 
-	x := binary.BigEndian.Uint64(r[:])
+	x := binary.BigEndian.Uint64(r)
 	u := float64(x)/float64(^uint64(0)) - .5
 
 	var abs, sign float64

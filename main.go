@@ -1,71 +1,51 @@
-package SimpleVuvuzela
+package main
 
 import (
-	"flag"
-	"text/template"
-	"vuvuzela.io/alpenhorn/encoding/toml"
-	"github.com/tjfoc/gmsm/sm2"
-	"os/user"
-	"fmt"
-	"path/filepath"
-	"os"
-	"bytes"
-	"io/ioutil"
 	"crypto/rand"
-	"net"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io/ioutil"
 	"log"
+	"net"
+	"os"
+	"os/user"
+	"path/filepath"
+	"time"
+
+	"github.com/tjfoc/gmsm/sm2"
 )
 
 var (
-	doinit = flag.Bool("init", false, "create config file")
-
-	funcMap = template.FuncMap{
-		"base32": toml.EncodeBytes,
-	}
-
-	noise = &Laplace{
-		Mu: 100,
-		B:  3.0,
-	}
+	doinit        = flag.Bool("init", false, "create config file")
+	doctrineHome  string
+	destPublickey = getDestPublickey()
 )
 
-const doctrineTemplate = `# Vuvuzela server doctrine
-publicKey  = {{.PublicKey | base32 | printf "%q"}}
-Signature  = {{.Signature | base32 | printf "%q"}}
-`
-
 type Doctrine struct {
-	PublicKey  []byte
-	Signature  []byte
+	PublicKey []byte
+	Signature []byte
 }
 
-func initServer(){
-	u, err := user.Current()
-	if err != nil {
-		fmt.Errorf("Init Server Error: %s\n", err)
-	}
-	doctrineHome := filepath.Join(u.HomeDir, ".vuvuzela")
-
-	err = os.Mkdir(doctrineHome, 0700)
+func initServer() {
+	err := os.Mkdir(doctrineHome, 0700)
 	if err == nil {
 		fmt.Printf("Created directory %s\n", doctrineHome)
 	} else if !os.IsExist(err) {
-		fmt.Errorf("Init Server Error: %s\n", err)
+		fmt.Printf("Init Server Error: %s\n", err)
 	}
 
 	fmt.Printf("--> Generating server key pair and doctrine.\n")
-	doctrinePath := filepath.Join(doctrineHome)
-	if overwrite(doctrinePath) {
-		writeNewDoctrine(doctrinePath)
+	if overwrite(doctrineHome) {
+		writeNewDoctrine()
 		fmt.Printf("--> Done.\n")
 	}
 }
 
-
-func writeNewDoctrine(doctrineHome string) {
+func writeNewDoctrine() {
 	keypair, err := sm2.GenerateKey()
 	if err != nil {
-		panic(err)
+		fmt.Printf("generate key error: %s\n", err)
 	}
 	publickey := &keypair.PublicKey
 	// 生成密钥文件
@@ -88,20 +68,16 @@ func writeNewDoctrine(doctrineHome string) {
 		return
 	}
 	doctrine := &Doctrine{
-		PublicKey:  der,
-		Signature:  signature,
+		PublicKey: der,
+		Signature: signature,
 	}
-
-	tmpl := template.Must(template.New("doctrine").Funcs(funcMap).Parse(doctrineTemplate))
-
-	buf := new(bytes.Buffer)
-	err = tmpl.Execute(buf, doctrine)
+	buf, err := json.Marshal(doctrine)
 	if err != nil {
 		fmt.Printf("template error: %s\n", err)
 		return
 	}
 
-	err = ioutil.WriteFile(filepath.Join(doctrineHome, "doctrine.json"), buf.Bytes(), 0600)
+	err = ioutil.WriteFile(filepath.Join(doctrineHome, "doctrine.json"), buf, 0600)
 	if err != nil {
 		fmt.Printf("write file error: %s\n", err)
 		return
@@ -133,33 +109,22 @@ func overwrite(path string) bool {
 	return true
 }
 
-func main(){
+func main() {
 	flag.Parse()
+
+	u, err := user.Current()
+	if err != nil {
+		fmt.Printf("get user home error: %s\n", err)
+		return
+	}
+	doctrineHome = filepath.Join(u.HomeDir, ".vuvuzela")
 
 	if *doinit {
 		initServer()
 		return
 	}
 
-	u, err := user.Current()
-	if err != nil {
-		fmt.Printf("write file error: %s\n", err)
-		return
-	}
-	doctrineHome := filepath.Join(u.HomeDir, ".vuvuzela")
-
-	doctrinePath := filepath.Join(doctrineHome, "doctrine.json")
-	data, err := ioutil.ReadFile(doctrinePath)
-	if err != nil {
-		fmt.Printf("read doctrine error: %s\n", err)
-		return
-	}
-	doctrine := new(Doctrine)
-	err = toml.Unmarshal(data, doctrine)
-	if err != nil {
-		fmt.Printf("parse doctrine error: %s\n", err)
-		return
-	}
+	go preach()
 
 	privateKey, err := sm2.ReadPrivateKeyFromPem(filepath.Join(doctrineHome, "priv.pem"), nil) // 读取密钥
 	if err != nil {
@@ -167,11 +132,21 @@ func main(){
 		return
 	}
 
-	l, err := net.Listen("tcp", ":8888")
+	l, err := net.Listen("tcp", ":4567")
 	if err != nil {
 		fmt.Println("listen error:", err)
 		return
 	}
+	ticker := time.NewTicker(RoundDelay).C
+	go func() {
+		for {
+			select {
+			case <-ticker:
+				roundstart()
+			}
+
+		}
+	}()
 
 	for {
 		c, err := l.Accept()
@@ -181,7 +156,7 @@ func main(){
 		}
 		// start a new goroutine to handle
 		// the new connection.
-		go handleConn(c, privateKey)
+		go dealConn(c, privateKey)
 	}
 
 }
@@ -198,4 +173,72 @@ func handleConn(c net.Conn, privatekey *sm2.PrivateKey) {
 		}
 		log.Printf("read %d bytes, content is %s\n", n, string(buf[:n]))
 	}
+}
+
+func preach() {
+	doctrinePath := filepath.Join(doctrineHome, "doctrine.json")
+	data, err := ioutil.ReadFile(doctrinePath)
+	if err != nil {
+		fmt.Printf("read doctrine error: %s\n", err)
+		return
+	}
+	doctrine := new(Doctrine)
+	err = json.Unmarshal(data, doctrine)
+	if err != nil {
+		fmt.Printf("parse doctrine error: %s\n", err)
+		return
+	}
+
+	l, err := net.Listen("tcp", ":3456")
+	if err != nil {
+		fmt.Println("listen error:", err)
+		return
+	}
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			fmt.Println("accept error:", err)
+			break
+		}
+		c.Write(data)
+		c.Close()
+	}
+}
+
+func getDestPublickey() *sm2.PublicKey {
+	//conn, err := net.Dial("tcp", "211.159.187.82:3456")
+	conn, err := net.Dial("tcp", "101.200.37.186:3456")
+	if err != nil {
+		log.Printf("dial error: %s", err)
+		return nil
+	}
+	doctrinebuf := make([]byte, 251)
+	_, err = conn.Read(doctrinebuf[:])
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			fmt.Println("read timeout:", err)
+		} else {
+			fmt.Println("read publickey error:", err)
+		}
+	}
+	fmt.Printf("received doctrine is %v\n", doctrinebuf)
+	doctrine := new(Doctrine)
+	err = json.Unmarshal(doctrinebuf, doctrine)
+	if err != nil {
+		log.Printf("unmarshal doctrine error: %s", err)
+		return nil
+	}
+	signature := doctrine.Signature
+	publickeybuf := doctrine.PublicKey
+	fmt.Printf("publickey is %v\n", publickeybuf)
+	publickey, err := sm2.ParseSm2PublicKey(publickeybuf)
+	if err != nil {
+		log.Printf("parse publickey error: %s", err)
+		return nil
+	}
+	signaturemsg := []byte("thankyou")
+	if publickey.Verify(signaturemsg, signature) {
+		return publickey
+	}
+	return nil
 }

@@ -28,18 +28,8 @@ var (
 	}
 )
 
-func dealConn(c net.Conn, privatekey *sm2.PrivateKey) {
-	buf := make([]byte, SizeOnionMessage)
-	n, err := c.Read(buf)
-	if err != nil {
-		log.Println("conn read error:", err)
-		return
-	}
-	if n != SizeOnionMessage {
-		log.Printf("read conn msg length error: expected %d bytes, received %d bytes\n", SizeOnionMessage, n)
-		return
-	}
-	msg, err := privatekey.Decrypt(buf)
+func dealConn(buf *[]byte, privatekey *sm2.PrivateKey) {
+	msg, err := privatekey.Decrypt(*buf)
 	if err != nil {
 		log.Println("decrypt msg error:", err)
 		return
@@ -59,7 +49,6 @@ func roundstart() {
 		generatenoise()
 	}
 	generatenoise()
-	//time.Sleep(RoundDelay)
 }
 
 func generatenoise() {
@@ -69,7 +58,6 @@ func generatenoise() {
 		fmt.Printf("encrypt noise error: %s\n", err)
 	}
 	msgpool := msgpoolpool[roundnum%MsgPoolNum]
-	fmt.Printf("noise is %v\n", newnoise)
 	msgpool <- newnoise
 }
 

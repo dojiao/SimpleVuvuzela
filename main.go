@@ -156,23 +156,21 @@ func main() {
 		}
 		// start a new goroutine to handle
 		// the new connection.
-		go dealConn(c, privateKey)
-	}
+		buf := make([]byte, SizeOnionMessage)
 
-}
-
-func handleConn(c net.Conn, privatekey *sm2.PrivateKey) {
-	defer c.Close()
-	for {
-		var buf = make([]byte, 10)
-		log.Println("start to read from conn")
 		n, err := c.Read(buf)
 		if err != nil {
 			log.Println("conn read error:", err)
 			return
 		}
-		log.Printf("read %d bytes, content is %s\n", n, string(buf[:n]))
+		if n != SizeOnionMessage {
+			log.Printf("read conn msg length error: expected %d bytes, received %d bytes\n", SizeOnionMessage, n)
+			return
+		}
+		go dealConn(&buf, privateKey)
+		c.Close()
 	}
+
 }
 
 func preach() {

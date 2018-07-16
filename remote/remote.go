@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"os"
 	"os/user"
@@ -17,14 +16,14 @@ import (
 
 const (
 	EncryptLenStep       = 96
-	SizeSequence         = 4
-	SizeMessageBody      = 240
+	SizeSequence         = 1
+	SizeMessageBody      = 238
 	SizeEncryptedMessage = SizeSequence + SizeMessageBody + EncryptLenStep
-	SizeOnionMessage     = SizeEncryptedMessage + EncryptLenStep
+	SizeOnionMessage     = SizeSequence + SizeEncryptedMessage + EncryptLenStep
 )
 
 var (
-	doinit       = flag.Bool("init", false, "create config file")
+	doinit = flag.Bool("init", false, "create config file")
 )
 
 type Doctrine struct {
@@ -159,21 +158,22 @@ func handleConn(c net.Conn, privatekey *sm2.PrivateKey) {
 	defer c.Close()
 	buf := make([]byte, SizeEncryptedMessage)
 	n, err := c.Read(buf)
-	fmt.Printf("read :%v\n", buf)
 	if err != nil {
-		log.Println("conn read error:", err)
+		fmt.Println("conn read error:", err)
 		return
 	}
 	if n != SizeEncryptedMessage {
-		log.Printf("read conn msg length error: expected %d bytes, received %d bytes\n", SizeEncryptedMessage, n)
+		fmt.Printf("read conn msg length error: expected %d bytes, received %d bytes\n", SizeEncryptedMessage, n)
 		return
 	}
 	msg, err := privatekey.Decrypt(buf)
 	if err != nil {
-		log.Println("decrypt msg error:", err)
+		fmt.Printf("decrypt msg error: %v\n", msg)
 		return
 	}
-	fmt.Printf("msg is %v\n", msg)
+	if msg[0] != 0 {
+		fmt.Printf("msg is %s\n", string(msg[1:]))
+	}
 }
 
 func preach(doctrineHome string) {
@@ -212,5 +212,5 @@ func getDoctrineHome() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(u.HomeDir, ".vuvuzela_remote"), nil
+	return filepath.Join(u.HomeDir, ".vuvuzela_remote"), err
 }

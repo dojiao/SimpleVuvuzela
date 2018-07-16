@@ -2,19 +2,16 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"time"
-
-	"github.com/tjfoc/gmsm/sm2"
 )
 
 const (
 	EncryptLenStep       = 96
-	SizeSequence         = 4
-	SizeMessageBody      = 240
+	SizeSequence         = 1
+	SizeMessageBody      = 238
 	SizeEncryptedMessage = SizeSequence + SizeMessageBody + EncryptLenStep
-	SizeOnionMessage     = SizeEncryptedMessage + EncryptLenStep
+	SizeOnionMessage     = SizeSequence + SizeEncryptedMessage + EncryptLenStep
 	RoundDelay           = 800 * time.Millisecond
 	MsgPoolNum           = 10
 )
@@ -28,12 +25,7 @@ var (
 	}
 )
 
-func dealConn(buf *[]byte, privatekey *sm2.PrivateKey) {
-	msg, err := privatekey.Decrypt(*buf)
-	if err != nil {
-		log.Println("decrypt msg error:", err)
-		return
-	}
+func dealMessage(msg []byte) {
 	msgpool := msgpoolpool[roundnum%MsgPoolNum]
 	msgpool <- msg
 }
@@ -53,7 +45,7 @@ func roundstart() {
 
 func generatenoise() {
 	noisebuf := make([]byte, SizeSequence+SizeMessageBody)
-	newnoise, err := destPublickey.Encrypt(noisebuf)
+	newnoise, err := destPublicKey.Encrypt(noisebuf)
 	if err != nil {
 		fmt.Printf("encrypt noise error: %s\n", err)
 	}
